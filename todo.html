@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Task Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Fira Code', monospace;
+            background-color: #191919;
+        }
+        .completed span { text-decoration: line-through; color: #71717a; }
+        button { line-height: 1.25; }
+        *:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+
+        /* Progress Ring SVG */
+        .progress-ring__circle--progress {
+            transition: stroke-dashoffset 0.35s;
+            transform: rotate(-90deg); transform-origin: 50% 50%; stroke-linecap: round;
+        }
+
+        /* Matrix Chart Styles */
+        .matrix-chart { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; sm:gap-4px; }
+        .matrix-day {
+            width: 100%; padding-bottom: 100%; position: relative; border-radius: 2px; sm:border-radius: 3px;
+            background-color: #3f3f46;
+            transition: background-color 0.3s ease;
+        }
+        .matrix-day.level-0 { background-color: #3f3f46; }
+        .matrix-day.level-1 { background-color: #0e4429; }
+        .matrix-day.level-2 { background-color: #006d32; }
+        .matrix-day.level-3 { background-color: #26a641; }
+        .matrix-day.level-4 { background-color: #39d353; }
+
+        .matrix-day span { /* Tooltip */
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 9px; sm:font-size: 10px;
+            color: white; opacity: 0; transition: opacity 0.2s;
+            background: rgba(0,0,0,0.7); border-radius: 2px; sm:border-radius: 3px; pointer-events: none;
+            padding: 1px; sm:padding: 2px; text-align: center; line-height: 1.1;
+        }
+        .matrix-day:hover span { opacity: 1; }
+
+        /* Detailed Log Styles */
+        .log-entry { border-bottom: 1px solid #3f3f46; padding-bottom: 6px; margin-bottom: 6px; }
+        .log-entry:last-child { border-bottom: none; margin-bottom: 0; }
+        .log-list { list-style: none; padding-left: 0; }
+        .log-list li { margin-bottom: 2px; padding-left: 12px; position: relative; }
+        .log-list li.completed-task::before { content: '✓'; color: #34d399; position: absolute; left: 0; top: 1px; }
+        .log-list li.missed-task::before { content: '✗'; color: #f87171; position: absolute; left: 0; top: 1px; }
+
+        /* Subtle scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #2f2f2f; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb { background: #52525b; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #71717a; }
+    </style>
+</head>
+<body class="text-gray-200 flex items-start justify-center min-h-screen p-2 pt-4 sm:p-4 sm:pt-8 md:pt-12">
+
+    <div class="bg-[#2f2f2f] p-3 sm:p-5 md:p-6 rounded-lg shadow-xl w-full max-w-md border border-zinc-700/50">
+        <div id="dateTimeDisplay" class="text-center text-[11px] sm:text-xs text-zinc-400 mb-2 sm:mb-3">Loading...</div>
+
+        <div class="flex items-center justify-between mb-3 sm:mb-4">
+             <h1 class="text-lg sm:text-xl md:text-2xl font-bold text-gray-100">Daily Tasks</h1>
+             <div class="relative w-14 h-14 sm:w-16 sm:h-16">
+                <svg id="dailyProgressSvg" class="w-full h-full" viewBox="0 0 36 36">
+                    <path class="text-zinc-700" stroke="currentColor" stroke-width="3.5" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                    <path id="progressRingCircle" class="progress-ring__circle--progress text-blue-500" stroke="currentColor" stroke-width="3.5" fill="none" stroke-dasharray="100, 100" stroke-dashoffset="100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                </svg>
+                <div class="absolute top-0 left-0 w-full h-full flex items-center justify-center">
+                     <span id="progressPercentage" class="text-xs sm:text-sm font-medium text-gray-200">0%</span>
+                </div>
+            </div>
+        </div>
+
+        <ul id="taskList" class="space-y-1 sm:space-y-1.5 mb-4 sm:mb-5"></ul>
+        <p id="emptyMessage" class="text-center text-zinc-500 text-sm mt-4 hidden">All tasks completed!</p>
+
+        <hr class="border-zinc-600 my-4 sm:my-5">
+
+        <div class="mb-4 sm:mb-5">
+            <h2 class="text-base sm:text-lg font-semibold text-gray-200 mb-2 sm:mb-3">Completion Log</h2>
+            <div id="matrixChartContainer">
+                 <div class="matrix-chart bg-zinc-800 p-1 sm:p-2 rounded"></div>
+                 <div class="flex justify-between text-[10px] sm:text-xs text-zinc-500 mt-1 px-0.5 sm:px-1">
+                     <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+                 </div>
+            </div>
+        </div>
+
+        <button id="toggleLogSectionBtn" class="w-full text-left text-xs sm:text-sm text-zinc-400 hover:text-zinc-200 mb-2 sm:mb-3 transition">
+            View Details & Add Task ▼
+        </button>
+
+        <div id="logSection" class="hidden">
+             <h2 class="text-base sm:text-lg font-semibold text-gray-200 mb-2 sm:mb-3">Daily Log Details</h2>
+             <div id="detailedLogContainer" class="max-h-48 sm:max-h-60 overflow-y-auto bg-zinc-800 p-2 sm:p-3 rounded text-xs sm:text-sm mb-4 sm:mb-5">
+                <p class="text-zinc-500">No detailed logs available yet.</p>
+            </div>
+
+             <h2 class="text-base sm:text-lg font-semibold text-gray-200 mb-2 sm:mb-3">Add New Recurring Task</h2>
+            <div class="flex gap-1.5 sm:gap-2">
+                <input type="text" id="newRecurringTaskInput" placeholder="Enter new daily task..." aria-label="New recurring task input"
+                       class="flex-grow p-1.5 sm:p-2 bg-[#373737] border border-transparent text-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 placeholder-zinc-500 text-xs sm:text-sm">
+                <button id="addRecurringTaskBtn" aria-label="Add recurring task"
+                        class="bg-green-600 hover:bg-green-700 text-white font-semibold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-md transition duration-200 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:ring-offset-[#2f2f2f] text-xs sm:text-sm">
+                    Add
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- DOM Element References ---
+            const taskList = document.getElementById('taskList');
+            const emptyMessage = document.getElementById('emptyMessage');
+            const dateTimeDisplay = document.getElementById('dateTimeDisplay');
+            const progressRingCircle = document.getElementById('progressRingCircle');
+            const progressPercentage = document.getElementById('progressPercentage');
+            const toggleLogSectionBtn = document.getElementById('toggleLogSectionBtn');
+            const logSection = document.getElementById('logSection');
+            const newRecurringTaskInput = document.getElementById('newRecurringTaskInput');
+            const addRecurringTaskBtn = document.getElementById('addRecurringTaskBtn');
+            const matrixChartContainer = document.getElementById('matrixChartContainer').querySelector('.matrix-chart');
+            const detailedLogContainer = document.getElementById('detailedLogContainer');
+
+            // --- Configuration ---
+            const TIME_ZONE = 'Asia/Colombo';
+            const DEFAULT_RECURRING_TASKS = ['Study Acc', 'Study BS', 'Study ICT', 'Work out', 'Work on businesses'];
+            const LAST_VISIT_DATE_KEY = 'todoListLastVisitDate_v7';
+            const TASKS_STORAGE_KEY = 'todoListTasks_v7';
+            const RECURRING_LIST_KEY = 'todoListRecurringTexts_v7';
+            const COMPLETION_LOG_KEY = 'todoListCompletionLog_v7';
+
+            // --- State ---
+            let tasks = [];
+            let recurringTaskTexts = [];
+            let completionLog = {};
+
+            // --- Tone.js Sound Setup ---
+            let synth; // Declare synth variable
+
+            // Function to initialize and play a sound
+            function playSound(note = 'C4', duration = '16n', velocity = 0.6) {
+                // Initialize synth on first user interaction (or if not already initialized)
+                if (!synth) {
+                    // Ensure Tone.start() is called within a user gesture if needed,
+                    // but clicks usually suffice.
+                    Tone.start();
+                    synth = new Tone.Synth({
+                        oscillator: { type: 'sine' }, // Simple sound
+                        envelope: {
+                            attack: 0.005,
+                            decay: 0.1,
+                            sustain: 0.1,
+                            release: 0.1
+                        },
+                        volume: -15 // Lower volume for subtle effect
+                    }).toDestination();
+                     console.log("Tone.js Synth Initialized");
+                }
+
+                // Play the sound
+                try {
+                    if (synth && Tone.context.state === 'running') {
+                         synth.triggerAttackRelease(note, duration, Tone.now(), velocity);
+                    } else {
+                        console.log("Tone.js context not running or synth not ready.");
+                    }
+                } catch (error) {
+                    console.error("Error playing sound:", error);
+                    // Attempt to re-initialize or start Tone context if needed
+                    if (Tone.context.state !== 'running') {
+                        Tone.start().then(() => {
+                             console.log("Tone.js context started after error.");
+                             // Retry playing sound? Be careful not to create infinite loops.
+                        });
+                    }
+                }
+            }
+
+
+            // --- Initialization ---
+            loadRecurringTaskTexts();
+            loadCompletionLog();
+            initializeDailyTasks();
+            updateDateTime();
+            setInterval(updateDateTime, 1000);
+            updateProgressRing();
+            renderMatrixChart();
+            renderDetailedLogs();
+
+            // --- Event Listeners ---
+            taskList.addEventListener('click', handleTaskListClick);
+            toggleLogSectionBtn.addEventListener('click', toggleLogSection);
+            addRecurringTaskBtn.addEventListener('click', addNewRecurringTask);
+            newRecurringTaskInput.addEventListener('keypress', (event) => {
+                if (event.key === 'Enter') { addNewRecurringTask(); }
+            });
+
+            // --- Core Functions ---
+
+            function initializeDailyTasks() {
+                const storedTasks = localStorage.getItem(TASKS_STORAGE_KEY);
+                tasks = storedTasks ? JSON.parse(storedTasks) : [];
+                const lastVisitDate = localStorage.getItem(LAST_VISIT_DATE_KEY) || getCurrentDateString(TIME_ZONE);
+                const currentDate = getCurrentDateString(TIME_ZONE);
+                let tasksModified = false;
+
+                if (currentDate !== lastVisitDate) {
+                    console.log(`New day (${currentDate}) detected. Logging previous day (${lastVisitDate}).`);
+                    const previousTasksState = storedTasks ? JSON.parse(storedTasks) : [];
+                    if (!completionLog[lastVisitDate]) {
+                         logDayCompletion(lastVisitDate, previousTasksState);
+                    }
+                    console.log(`Resetting tasks for ${currentDate}.`);
+                    tasks = tasks.map(task => ({ ...task, completed: false }));
+                    tasksModified = true;
+                    localStorage.setItem(LAST_VISIT_DATE_KEY, currentDate);
+                    if (!completionLog[currentDate]) {
+                        completionLog[currentDate] = { completed: [], missed: tasks.map(t => t.text), total: tasks.length };
+                        saveCompletionLog();
+                    }
+                } else {
+                     updateCurrentDayLog();
+                }
+
+                let currentTaskTexts = tasks.map(t => t.text);
+                recurringTaskTexts.forEach(recurringText => {
+                    if (!currentTaskTexts.includes(recurringText)) {
+                        tasks.push({ id: Date.now() + Math.random(), text: recurringText, completed: false, type: 'recurring' });
+                        tasksModified = true;
+                    }
+                });
+                const initialTaskCount = tasks.length;
+                tasks = tasks.filter(task => recurringTaskTexts.includes(task.text));
+                if (tasks.length < initialTaskCount) { tasksModified = true; }
+
+                if (tasksModified) { saveTasksToStorage(); }
+                renderTasks();
+                updateEmptyMessageVisibility();
+            }
+
+            function handleTaskListClick(event) {
+                const target = event.target;
+                const listItem = target.closest('li');
+                if (!listItem) return;
+                const taskId = Number(listItem.dataset.id);
+
+                if (target.tagName === 'SPAN') {
+                    // Determine if completing or un-completing before toggling state
+                    const task = tasks.find(t => t.id === taskId);
+                    const isCompleting = !task.completed; // Will it be completed after the toggle?
+
+                    toggleTaskComplete(taskId); // Toggle the state
+
+                    // Play sound after state is toggled
+                    if (isCompleting) {
+                        playSound('C5', '16n', 0.6); // Higher pitch for complete
+                    } else {
+                        playSound('A4', '16n', 0.5); // Lower pitch for un-complete
+                    }
+
+                } else if (target.classList.contains('delete-btn')) {
+                    listItem.style.transition = 'background-color 0.1s ease-in-out';
+                    listItem.style.backgroundColor = '#dc2626';
+                    setTimeout(() => { listItem.style.backgroundColor = ''; }, 300);
+                     playSound('E3', '8n', 0.4); // Low error/thud sound
+                }
+            }
+
+            function toggleTaskComplete(taskId) {
+                let taskChanged = false;
+                tasks = tasks.map(task => {
+                    if (task.id === taskId) {
+                        taskChanged = true;
+                        return { ...task, completed: !task.completed };
+                    }
+                    return task;
+                });
+                if (taskChanged) {
+                    const listItem = taskList.querySelector(`li[data-id="${taskId}"]`);
+                    if (listItem) {
+                        listItem.classList.toggle('completed');
+                        const span = listItem.querySelector('span');
+                        if (span) { span.setAttribute('aria-checked', listItem.classList.contains('completed')); }
+                    }
+                    saveTasksToStorage();
+                    updateProgressRing();
+                    updateEmptyMessageVisibility();
+                    updateCurrentDayLog();
+                    renderMatrixChart();
+                    renderDetailedLogs();
+                    // Sound is played in handleTaskListClick *after* calling this
+                }
+            }
+
+            function updateCurrentDayLog() {
+                const todayDateString = getCurrentDateString(TIME_ZONE);
+                const completedTasks = tasks.filter(task => task.completed).map(task => task.text);
+                const missedTasks = tasks.filter(task => !task.completed).map(task => task.text);
+                completionLog[todayDateString] = {
+                    completed: completedTasks,
+                    missed: missedTasks,
+                    total: tasks.length
+                };
+                saveCompletionLog();
+            }
+
+            function addNewRecurringTask() {
+                const taskText = newRecurringTaskInput.value.trim();
+                if (taskText === '') {
+                    alert("Please enter a task name.");
+                     playSound('F#3', '8n', 0.4); // Error sound
+                    return;
+                }
+                if (recurringTaskTexts.includes(taskText)) {
+                    alert(`Task "${taskText}" already exists.`);
+                     playSound('F#3', '8n', 0.4); // Error sound
+                    return;
+                }
+
+                recurringTaskTexts.push(taskText);
+                saveRecurringTaskTexts();
+                const newTask = { id: Date.now() + Math.random(), text: taskText, completed: false, type: 'recurring' };
+                tasks.push(newTask);
+                saveTasksToStorage();
+                createTaskElement(newTask);
+                updateProgressRing();
+                updateEmptyMessageVisibility();
+                updateCurrentDayLog();
+                renderMatrixChart();
+                renderDetailedLogs();
+                newRecurringTaskInput.value = '';
+                newRecurringTaskInput.focus();
+                playSound('E5', '16n', 0.7); // Success sound for adding task
+            }
+
+            // --- Rendering and Utility Functions ---
+
+            function renderTasks() {
+                taskList.innerHTML = '';
+                if (tasks.length > 0) {
+                    tasks.sort((a, b) => recurringTaskTexts.indexOf(a.text) - recurringTaskTexts.indexOf(b.text));
+                    tasks.forEach(task => createTaskElement(task));
+                }
+                updateEmptyMessageVisibility();
+            }
+
+            function createTaskElement(task) {
+                const li = document.createElement('li');
+                li.dataset.id = task.id;
+                li.className = `flex items-center justify-between bg-[#373737] p-1.5 sm:p-2 rounded-md hover:bg-zinc-600 transition duration-150 ${task.completed ? 'completed' : ''}`;
+                li.setAttribute('role', 'listitem');
+                const span = document.createElement('span');
+                span.textContent = task.text;
+                span.className = 'flex-grow mr-2 cursor-pointer text-gray-200 text-xs sm:text-sm break-words';
+                span.setAttribute('role', 'checkbox');
+                span.setAttribute('aria-checked', task.completed);
+                span.setAttribute('tabindex', '0');
+                span.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                         // Determine if completing or un-completing before toggling state
+                        const task = tasks.find(t => t.id === Number(li.dataset.id)); // Get task ID from li
+                        const isCompleting = !task.completed;
+                        toggleTaskComplete(task.id);
+                         // Play sound after state is toggled
+                        if (isCompleting) { playSound('C5', '16n', 0.6); }
+                        else { playSound('A4', '16n', 0.5); }
+                    }
+                });
+                const deleteBtn = document.createElement('button');
+                deleteBtn.innerHTML = '&times;';
+                deleteBtn.className = 'delete-btn bg-zinc-600 text-zinc-400 font-bold w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center rounded text-[10px] sm:text-xs cursor-not-allowed opacity-50';
+                deleteBtn.disabled = true;
+                deleteBtn.setAttribute('title', 'Recurring tasks cannot be deleted');
+                li.appendChild(span);
+                li.appendChild(deleteBtn);
+                taskList.appendChild(li);
+            }
+
+            function updateProgressRing() {
+                const totalTasks = tasks.length;
+                if (totalTasks === 0) { setRingProgress(0); return; }
+                const completedTasks = tasks.filter(task => task.completed).length;
+                const percentage = Math.round((completedTasks / totalTasks) * 100);
+                setRingProgress(percentage);
+            }
+
+            function setRingProgress(percent) {
+                const radius = 15.9155;
+                const circumference = 2 * Math.PI * radius;
+                const offset = circumference - (percent / 100) * circumference;
+                progressRingCircle.style.strokeDashoffset = offset;
+                progressPercentage.textContent = `${percent}%`;
+            }
+
+            function updateDateTime() {
+                const now = new Date();
+                const optionsDate = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', timeZone: TIME_ZONE };
+                const optionsTime = { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: TIME_ZONE };
+                const formattedDate = now.toLocaleDateString(undefined, optionsDate);
+                const formattedTime = now.toLocaleTimeString(undefined, optionsTime);
+                dateTimeDisplay.textContent = `${formattedDate} ${formattedTime} (${TIME_ZONE.replace('_', ' ')})`;
+            }
+
+            function getCurrentDateString(timeZone, dateObj = null) {
+                 const targetDate = dateObj || new Date();
+                 try {
+                    const options = { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: timeZone };
+                    const formatter = new Intl.DateTimeFormat('sv-SE', options);
+                    return formatter.format(targetDate);
+                } catch (e) {
+                    console.error("Error formatting date with timezone:", e);
+                    const year = targetDate.getFullYear();
+                    const month = String(targetDate.getMonth() + 1).padStart(2, '0');
+                    const day = String(targetDate.getDate()).padStart(2, '0');
+                    return `${year}-${month}-${day}`;
+                }
+            }
+
+            function updateEmptyMessageVisibility() {
+                if (tasks.length === 0) {
+                    emptyMessage.textContent = "No recurring tasks defined.";
+                    emptyMessage.classList.remove('hidden');
+                } else if (tasks.every(task => task.completed)) {
+                    emptyMessage.textContent = "All tasks completed for today!";
+                    emptyMessage.classList.remove('hidden');
+                } else {
+                    emptyMessage.classList.add('hidden');
+                }
+            }
+
+            /** Toggles visibility of the detailed log/add task section */
+            function toggleLogSection() {
+                const isHidden = logSection.classList.toggle('hidden');
+                toggleLogSectionBtn.textContent = isHidden
+                    ? 'View Details & Add Task ▼'
+                    : 'Hide Details & Add Task ▲';
+                // Play sound on toggle
+                playSound(isHidden ? 'G4' : 'A#4', '16n', 0.5);
+            }
+
+            // --- Logging and Matrix Chart Functions ---
+
+            function logDayCompletion(dateString, tasksStateForDay) {
+                if (completionLog[dateString]) {
+                    console.log(`Log for ${dateString} already exists. Skipping.`);
+                    return;
+                }
+                if (!tasksStateForDay) {
+                     console.warn(`No previous task state available for ${dateString}. Logging as empty.`);
+                     completionLog[dateString] = { completed: [], missed: [], total: 0 };
+                     saveCompletionLog();
+                     return;
+                }
+                 const completedTasks = tasksStateForDay.filter(task => task.completed).map(task => task.text);
+                 const missedTasks = tasksStateForDay.filter(task => !task.completed).map(task => task.text);
+                 completionLog[dateString] = { completed: completedTasks, missed: missedTasks, total: tasksStateForDay.length };
+                 saveCompletionLog();
+                 console.log(`Logged detailed completion for ${dateString}:`, completionLog[dateString]);
+            }
+
+            function renderMatrixChart() {
+                matrixChartContainer.innerHTML = '';
+                const referenceToday = new Date();
+                const todayDateString = getCurrentDateString(TIME_ZONE, referenceToday);
+                const daysToShow = 35;
+                const firstChartDate = new Date(referenceToday);
+                firstChartDate.setDate(referenceToday.getDate() - (daysToShow - 1));
+                const firstChartDateStr = getCurrentDateString(TIME_ZONE, firstChartDate);
+                const [year, month, day] = firstChartDateStr.split('-').map(Number);
+                const firstDayDateObj = new Date(Date.UTC(year, month - 1, day));
+                const firstDayOffset = firstDayDateObj.getUTCDay();
+
+                for(let i = 0; i < firstDayOffset; i++) {
+                    const placeholder = document.createElement('div');
+                    placeholder.className = 'matrix-day opacity-0 pointer-events-none';
+                    matrixChartContainer.appendChild(placeholder);
+                }
+
+                for (let i = 0; i < daysToShow; i++) {
+                    const date = new Date(referenceToday);
+                    date.setDate(referenceToday.getDate() - (daysToShow - 1 - i));
+                    const dateString = getCurrentDateString(TIME_ZONE, date);
+                    const isCurrentDay = (dateString === todayDateString);
+                    let level = 0;
+                    let tooltipText = "No data";
+                    const tooltipDate = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
+                    if (isCurrentDay) {
+                        const totalToday = tasks.length;
+                        const completedToday = tasks.filter(t => t.completed).length;
+                        const percentToday = totalToday === 0 ? 0 : Math.round((completedToday / totalToday) * 100);
+                        if (totalToday === 0) { level = 0; tooltipText = "No tasks"; }
+                        else if (percentToday === 100) { level = 4; tooltipText = `Completed ${completedToday}/${totalToday} (100%)`; }
+                        else if (percentToday >= 67) { level = 3; tooltipText = `Completed ${completedToday}/${totalToday} (${percentToday}%)`; }
+                        else if (percentToday >= 34) { level = 2; tooltipText = `Completed ${completedToday}/${totalToday} (${percentToday}%)`; }
+                        else if (percentToday > 0) { level = 1; tooltipText = `Completed ${completedToday}/${totalToday} (${percentToday}%)`; }
+                        else { level = 0; tooltipText = `Completed ${completedToday}/${totalToday} (0%)`; }
+                    } else {
+                        const logData = completionLog[dateString];
+                        if (logData) {
+                            if (logData.total > 0 && logData.missed.length === 0) { level = 4; tooltipText = `Completed ${logData.completed.length}/${logData.total}`; }
+                            else if (logData.total > 0) { level = 0; tooltipText = `Completed ${logData.completed.length}/${logData.total}`; }
+                            else { level = 0; tooltipText = `No tasks`; }
+                        } else { level = 0; tooltipText = "No data"; }
+                    }
+                    const dayDiv = document.createElement('div');
+                    dayDiv.className = `matrix-day level-${level}`;
+                    dayDiv.dataset.date = dateString;
+                    const tooltipSpan = document.createElement('span');
+                    tooltipSpan.textContent = `${tooltipDate}: ${tooltipText}`;
+                    dayDiv.appendChild(tooltipSpan);
+                    matrixChartContainer.appendChild(dayDiv);
+                }
+            }
+
+            function renderDetailedLogs() {
+                detailedLogContainer.innerHTML = '';
+                const todayDateString = getCurrentDateString(TIME_ZONE);
+                const logDates = Object.keys(completionLog)
+                                     .filter(dateStr => dateStr !== todayDateString)
+                                     .sort().reverse();
+                if (completionLog[todayDateString]) {
+                    logDates.unshift(todayDateString);
+                }
+                if (logDates.length === 0) {
+                    detailedLogContainer.innerHTML = '<p class="text-zinc-500">No detailed logs available yet.</p>';
+                    return;
+                }
+                const daysToDisplay = Math.min(logDates.length, 30);
+                let logsRendered = 0;
+                for (let i = 0; i < daysToDisplay; i++) {
+                    const dateStr = logDates[i];
+                    const logData = completionLog[dateStr];
+                    if (!logData || logData.total === 0) continue;
+                    const entryDiv = document.createElement('div');
+                    entryDiv.className = 'log-entry';
+                    const [year, month, day] = dateStr.split('-');
+                    const displayDateObj = new Date(year, month - 1, day);
+                    const displayDateStr = displayDateObj.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+                    const isToday = dateStr === todayDateString;
+                    entryDiv.innerHTML = `<h4 class="font-semibold text-gray-300 mb-1">${isToday ? 'Today' : displayDateStr} (${logData.completed.length}/${logData.total})</h4>`;
+                    const allTasksForDay = [
+                        ...logData.completed.map(text => ({ text, status: 'completed' })),
+                        ...logData.missed.map(text => ({ text, status: 'missed' }))
+                    ];
+                    allTasksForDay.sort((a, b) => recurringTaskTexts.indexOf(a.text) - recurringTaskTexts.indexOf(b.text));
+                    if (allTasksForDay.length > 0) {
+                         const list = document.createElement('ul');
+                         list.className = 'log-list';
+                         allTasksForDay.forEach(task => {
+                             const li = document.createElement('li');
+                             li.textContent = task.text;
+                             li.className = task.status === 'completed' ? 'completed-task text-emerald-400' : 'missed-task text-red-400';
+                             list.appendChild(li);
+                         });
+                         entryDiv.appendChild(list);
+                    }
+                    detailedLogContainer.appendChild(entryDiv);
+                    logsRendered++;
+                }
+                 if (logsRendered === 0) {
+                     detailedLogContainer.innerHTML = '<p class="text-zinc-500">No detailed logs available for the last 30 days.</p>';
+                 }
+            }
+
+            // --- Local Storage Functions ---
+            function saveTasksToStorage() { localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks)); }
+            function loadRecurringTaskTexts() {
+                const storedList = localStorage.getItem(RECURRING_LIST_KEY);
+                recurringTaskTexts = storedList ? JSON.parse(storedList) : [...DEFAULT_RECURRING_TASKS];
+                if (!storedList) { saveRecurringTaskTexts(); }
+            }
+            function saveRecurringTaskTexts() { localStorage.setItem(RECURRING_LIST_KEY, JSON.stringify(recurringTaskTexts)); }
+            function loadCompletionLog() {
+                const storedLog = localStorage.getItem(COMPLETION_LOG_KEY);
+                completionLog = storedLog ? JSON.parse(storedLog) : {};
+            }
+            function saveCompletionLog() { localStorage.setItem(COMPLETION_LOG_KEY, JSON.stringify(completionLog)); }
+
+        });
+    </script>
+
+</body>
+</html>
